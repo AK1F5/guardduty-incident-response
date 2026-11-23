@@ -1,0 +1,14 @@
+{
+  "bucket": "example-casefiles-lab",
+  "account": "111122223333",
+  "observedAt": "2026-11-01T10:14:00Z",
+  "PolicyStatus": {
+    "IsPublic": false
+  },
+  "PublicAccessBlockConfiguration": {
+    "BlockPublicAcls": true,
+    "IgnorePublicAcls": true,
+    "BlockPublicPolicy": true,
+    "RestrictPublicBuckets": true
+  }
+}

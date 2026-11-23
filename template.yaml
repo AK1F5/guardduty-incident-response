@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GuardDuty S3 public-access case tracker with a Python ingestion function and an analyst-operated case journal.
+Parameters:
+  ArtifactBucket:
+    Type: String
+    Description: Bucket in the stack region holding the Lambda zip.
+  ArtifactKey:
+    Type: String
+    Description: Immutable object key of the Lambda zip.
+Resources:
+  Cases:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: caseId, AttributeType: S}
+        - {AttributeName: rowId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: caseId, KeyType: HASH}
+        - {AttributeName: rowId, KeyType: RANGE}
+  Failures:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+  IngestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteCasesAndDiagnostics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem]
+                Resource: !GetAtt Cases.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt Failures.Arn
+  Ingest:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: app.handler.handle
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt IngestRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref ArtifactKey
+      Environment:
+        Variables:
+          CASE_TABLE: !Ref Cases
+      LoggingConfig:
+        LogGroup: !Ref Logs
+  AsyncFailureHandling:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref Ingest
+      Qualifier: '$LATEST'
+      MaximumRetryAttempts: 2
+      MaximumEventAgeInSeconds: 3600
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt Failures.Arn
+  Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source: [aws.guardduty]
+        detail-type: [GuardDuty Finding]
+        detail:
+          type: ['Policy:S3/BucketPublicAccessGranted']
+      Targets:
+        - Id: IngestFinding
+          Arn: !GetAtt Ingest.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 8
+          DeadLetterConfig:
+            Arn: !GetAtt Failures.Arn
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Ingest
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Rule.Arn
+  FailureQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref Failures]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sqs:SendMessage
+            Resource: !GetAtt Failures.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt Rule.Arn
+Outputs:
+  CaseTable:
+    Value: !Ref Cases
+  FailureQueueUrl:
+    Value: !Ref Failures
+  IngestFunction:
+    Value: !Ref Ingest

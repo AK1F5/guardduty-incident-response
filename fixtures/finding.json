@@ -1,0 +1,34 @@
+{
+  "version": "0",
+  "id": "00000000-0000-4000-8000-000000000001",
+  "detail-type": "GuardDuty Finding",
+  "source": "aws.guardduty",
+  "account": "111122223333",
+  "time": "2026-11-01T10:01:00Z",
+  "region": "us-east-1",
+  "resources": [],
+  "detail": {
+    "schemaVersion": "2.0",
+    "accountId": "111122223333",
+    "region": "us-east-1",
+    "id": "0123456789abcdef0123456789abcdef",
+    "arn": "arn:aws:guardduty:us-east-1:111122223333:detector/00000000000000000000000000000000/finding/0123456789abcdef0123456789abcdef",
+    "type": "Policy:S3/BucketPublicAccessGranted",
+    "severity": 8,
+    "resource": {
+      "resourceType": "S3Bucket",
+      "s3BucketDetails": [
+        {
+          "name": "example-casefiles-lab",
+          "arn": "arn:aws:s3:::example-casefiles-lab"
+        }
+      ]
+    },
+    "service": {
+      "eventFirstSeen": "2026-11-01T10:00:00Z",
+      "eventLastSeen": "2026-11-01T10:00:00Z",
+      "count": 1
+    },
+    "updatedAt": "2026-11-01T10:01:00Z"
+  }
+}

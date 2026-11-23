@@ -1,0 +1,15 @@
+{
+  "eventTime": "2026-11-01T10:00:00Z",
+  "eventSource": "s3.amazonaws.com",
+  "eventName": "PutBucketPolicy",
+  "awsRegion": "us-east-1",
+  "recipientAccountId": "111122223333",
+  "userIdentity": {
+    "type": "AssumedRole",
+    "arn": "arn:aws:sts::111122223333:assumed-role/example-release-role/demo-session"
+  },
+  "requestParameters": {
+    "bucketName": "example-casefiles-lab"
+  },
+  "eventID": "00000000-0000-4000-8000-000000000002"
+}
