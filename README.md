@@ -14,7 +14,9 @@ The demo uses SQLite and sample AWS events. It runs offline with the Python stan
 
 ## When can a case close?
 
-Recording the fix is one step. Closing the case requires a separate check of the affected bucket: all four S3 Block Public Access settings must be on, and the bucket policy must be nonpublic. The check must be newer than the fix and no more than five minutes old. If GuardDuty sees the issue again after remediation, the case reopens with its earlier history intact.
+The analyst records the fix, then checks the affected bucket. All four S3 Block Public Access settings must be on and the bucket policy must be nonpublic. The reading must come from the time of the fix or later and be at most five minutes old when the reviewer closes the case.
+
+A delayed copy of the original alert leaves the case closed. If GuardDuty reports fresh activity after the fix, the case reopens and keeps its earlier history.
 
 ## Running on AWS
 
