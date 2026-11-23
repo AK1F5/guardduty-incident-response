@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 FINDING = "Policy:S3/BucketPublicAccessGranted"
 BLOCK_FLAGS = ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets")
+CLOUDTRAIL_LOOKBACK = timedelta(minutes=5)
+MAX_VERIFICATION_AGE = timedelta(minutes=5)
 
 
 def instant(value):
@@ -53,10 +55,15 @@ def ingest(store, event):
             return {**incoming, "status": "OPEN", "owner": "unassigned"}, "Finding opened", "GuardDuty", incoming["updated"]
         if current["bucket"] != incoming["bucket"]:
             raise ValueError("Finding changed resource identity")
+
+        # A redelivery can have a different EventBridge ID. The finding ARN
+        # identifies the case; updatedAt tells us whether its contents changed.
         if incoming["updated"] <= current["updated"]:
             return None
         state = {**current, **incoming, "last_seen": max(current["last_seen"], incoming["last_seen"])}
         note = "Finding updated"
+        # GuardDuty can refresh a finding after the analyst has applied a fix.
+        # Reopen only if the activity itself happened after remediation.
         if current["status"] in {"REMEDIATED", "CLOSED"} and state["last_seen"] > current["remediated_at"]:
             state["status"] = "OPEN"
             for key in ("remediated_at", "verification", "cloudtrail_event"):
@@ -80,12 +87,17 @@ def transition(store, key, stage, analyst, when, evidence):
         state = {**current, "status": stage, "last_action": when}
         if stage == "TRIAGED":
             record = evidence
-            earliest = datetime.fromisoformat(current["last_seen"]) - timedelta(minutes=5)
+            earliest = datetime.fromisoformat(current["last_seen"]) - CLOUDTRAIL_LOOKBACK
             event_time = instant(record["eventTime"])
-            if (record["eventSource"] != "s3.amazonaws.com" or record["eventName"] not in {"PutBucketPolicy", "PutBucketAcl"}
-                    or record["recipientAccountId"] != current["account"] or record["awsRegion"] != current["region"]
-                    or record["requestParameters"]["bucketName"] != current["bucket"] or record.get("errorCode")
-                    or not earliest.isoformat(timespec="microseconds") <= event_time <= current["last_seen"]):
+            if (
+                record["eventSource"] != "s3.amazonaws.com"
+                or record["eventName"] not in {"PutBucketPolicy", "PutBucketAcl"}
+                or record["recipientAccountId"] != current["account"]
+                or record["awsRegion"] != current["region"]
+                or record["requestParameters"]["bucketName"] != current["bucket"]
+                or record.get("errorCode")
+                or not earliest.isoformat(timespec="microseconds") <= event_time <= current["last_seen"]
+            ):
                 raise ValueError("CloudTrail record does not match this finding")
             state["owner"] = analyst
             state["cloudtrail_event"] = required(record["eventID"], "CloudTrail event ID")
@@ -98,10 +110,17 @@ def transition(store, key, stage, analyst, when, evidence):
             config = evidence["PublicAccessBlockConfiguration"]
             observed = instant(evidence["observedAt"])
             age = datetime.fromisoformat(when) - datetime.fromisoformat(observed)
-            if (evidence["bucket"] != current["bucket"] or evidence["account"] != current["account"]
-                    or evidence["PolicyStatus"]["IsPublic"] is not False
-                    or any(config.get(flag) is not True for flag in BLOCK_FLAGS)
-                    or not current["remediated_at"] <= observed <= when or age > timedelta(minutes=5)):
+            # A reading taken before the fix says nothing about its effect.
+            # Even a passing reading expires so an analyst closing the case
+            # hours later has to check the bucket again.
+            if (
+                evidence["bucket"] != current["bucket"]
+                or evidence["account"] != current["account"]
+                or evidence["PolicyStatus"]["IsPublic"] is not False
+                or any(config.get(flag) is not True for flag in BLOCK_FLAGS)
+                or not current["remediated_at"] <= observed <= when
+                or age > MAX_VERIFICATION_AGE
+            ):
                 raise ValueError("Closure requires fresh, matching evidence of all four block settings and a nonpublic policy")
             state["verification"] = evidence
             note = "Verified all four S3 Block Public Access settings and a nonpublic bucket policy"

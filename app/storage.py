@@ -3,6 +3,9 @@ import sqlite3
 
 
 def change(store, key, decide):
+    # An alert can arrive while an analyst is closing the same case. If the
+    # revision has moved, recheck the decision against the latest state before
+    # writing. Retrying the old decision could close a reopened case.
     for _ in range(8):
         previous = store.get(key)
         decision = decide(previous)
@@ -36,6 +39,8 @@ class LocalStore:
     def commit(self, key, rev, state, entry):
         try:
             with self.db:
+                # Row zero holds the current case. Claim the next journal row
+                # first so a competing writer cannot overwrite the winner.
                 self.db.execute("INSERT INTO records VALUES (?, ?, ?)", (key, rev, json.dumps(entry)))
                 self.db.execute("INSERT OR REPLACE INTO records VALUES (?, 0, ?)", (key, json.dumps(state)))
         except sqlite3.IntegrityError:
